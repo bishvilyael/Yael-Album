@@ -65,20 +65,7 @@
       }
     });
 
-    // After a successful first authorization, try the shortest Google flow on future opens.
-    // No forced "consent" screen. If Safari blocks an automatic popup, one normal tap is enough.
-    if (wasAuthorized()) {
-      $('loginBtn').textContent = 'מתחבר…';
-      $('loginBtn').disabled = true;
-      setTimeout(() => {
-        try {
-          tokenClient.requestAccessToken({prompt: ''});
-        } catch {
-          $('loginBtn').disabled = false;
-          $('loginBtn').textContent = 'התחברות ל‑Google';
-        }
-      }, 250);
-    }
+
   }
 
   $('loginBtn').onclick = () => {
