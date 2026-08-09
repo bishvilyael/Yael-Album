@@ -3,7 +3,6 @@
   const ROOT = window.YAEL_CONFIG.ROOT_FOLDER_ID;
   const CLIENT_ID = window.YAEL_CONFIG.GOOGLE_CLIENT_ID;
   const stateKey = 'yael.pwa.state.v1';
-  const authKey = 'yael.pwa.authorized.v1';
   let tokenClient = null;
   let accessToken = null;
   let currentFolder = null;
@@ -15,7 +14,6 @@
   let objectUrl = null;
   let scale = 1, x = 0, y = 0;
   let drag = null;
-  let frontLoadSerial = 0;
 
   const $ = id => document.getElementById(id);
   const tree = $('tree'), drawer = $('drawer'), photo = $('photo'), textView = $('textView');
@@ -26,8 +24,6 @@
     try { localStorage.setItem(stateKey, JSON.stringify({folderId: currentFolder?.id || null, fileId: frontFile?.id || null})); } catch {}
   };
   const loadState = () => { try { return JSON.parse(localStorage.getItem(stateKey) || '{}'); } catch { return {}; } };
-  const wasAuthorized = () => { try { return localStorage.getItem(authKey) === '1'; } catch { return false; } };
-  const rememberAuthorized = () => { try { localStorage.setItem(authKey, '1'); } catch {} };
 
   function waitForGoogle() {
     if (window.google?.accounts?.oauth2) return initAuth();
@@ -43,49 +39,26 @@
       client_id: CLIENT_ID,
       scope: 'https://www.googleapis.com/auth/drive.readonly',
       callback: async resp => {
-        if (resp.error) {
-          $('loginBtn').disabled = false;
-          $('loginBtn').textContent = 'התחברות ל‑Google';
-          return setStatus('ההתחברות נכשלה: ' + resp.error);
-        }
+        if (resp.error) return setStatus('ההתחברות נכשלה: ' + resp.error);
         accessToken = resp.access_token;
-        rememberAuthorized();
         $('loginBtn').textContent = 'מחובר';
         $('loginBtn').disabled = true;
         setStatus('מחובר ל‑Google Drive');
         await buildRoot();
-      },
-      error_callback: err => {
-        // Browsers (especially iPhone/Safari) can block an automatic OAuth popup.
-        // In that case we simply leave the normal login button available.
-        console.debug('Yael OAuth popup:', err);
-        $('loginBtn').disabled = false;
-        $('loginBtn').textContent = 'התחברות ל‑Google';
-        if (err?.type !== 'popup_failed_to_open') setStatus('לחץ התחברות ל‑Google');
       }
     });
-
-
   }
 
   $('loginBtn').onclick = () => {
     if (!tokenClient) return setStatus('Google עדיין נטען…');
-    $('loginBtn').disabled = true;
-    $('loginBtn').textContent = 'מתחבר…';
-    // Important: do NOT force prompt:'consent'. Google reuses the prior grant when possible.
-    tokenClient.requestAccessToken();
+    tokenClient.requestAccessToken({prompt: accessToken ? '' : 'consent'});
   };
   $('treeBtn').onclick = () => drawer.classList.add('open');
   $('closeDrawer').onclick = () => drawer.classList.remove('open');
 
   async function drive(url, options={}) {
     const res = await fetch(url, { ...options, headers: { ...(options.headers||{}), Authorization: `Bearer ${accessToken}` }});
-    if (res.status === 401) {
-      accessToken = null;
-      $('loginBtn').disabled = false;
-      $('loginBtn').textContent = 'התחברות ל‑Google';
-      throw new Error('פג תוקף ההתחברות. התחבר מחדש.');
-    }
+    if (res.status === 401) { accessToken = null; throw new Error('פג תוקף ההתחברות. התחבר מחדש.'); }
     if (!res.ok) throw new Error(`Google Drive: ${res.status}`);
     return res;
   }
@@ -97,7 +70,7 @@
 
   async function listChildren(folderId) {
     const q = `'${folderId}' in parents and trashed=false`;
-    const fields = 'nextPageToken,files(id,name,mimeType,modifiedTime,size,capabilities(canDownload,canEdit))';
+    const fields = 'nextPageToken,files(id,name,mimeType,modifiedTime,size,capabilities(canDownload,canEdit),shortcutDetails(targetId,targetMimeType))';
     let pageToken = '', out = [];
     do {
       const u = new URL('https://www.googleapis.com/drive/v3/files');
@@ -151,6 +124,7 @@
     currentFolder=folder; setStatus(`פותח: ${folder.name}`);
     const items=await listChildren(folder.id);
     currentFiles = items.filter(f => /^image\//.test(f.mimeType) && !/^back$/i.test(f.name));
+    // Do not treat files physically inside a folder called Back as front images; current folder list is enough.
     currentIndex = preferredFileId ? currentFiles.findIndex(f=>f.id===preferredFileId) : 0;
     if(currentIndex<0) currentIndex=0;
     if(currentFiles.length) await showFront(currentIndex); else clearViewer('אין תמונות בתיקייה זו');
@@ -162,7 +136,6 @@
   }
 
   function clearViewer(msg) {
-    frontLoadSerial++;
     revokeObject(); photo.hidden=true; textView.hidden=true; emptyState.hidden=false; emptyState.textContent=msg;
     frontFile=backFile=textFile=null; currentIndex=-1; updateControls(); updateTabs();
   }
@@ -192,53 +165,63 @@
   }
 
   async function findCompanions(file) {
-    backFile=textFile=null;
-    updateTabs();
+    backFile = null;
+    textFile = null;
+
     const items = await listChildren(currentFolder.id);
-    const backFolder = items.find(f=>f.mimeType===FOLDER_MIME && f.name.toLowerCase()==='back');
-    if(!backFolder) return updateTabs();
-    const bitems=await listChildren(backFolder.id);
-    const stem = file.name.replace(/\.[^.]+$/, '').toLowerCase();
-    backFile = bitems.find(f =>
-      /^image\//.test(f.mimeType) &&
-      f.name.replace(/\.[^.]+$/, '').toLowerCase() === stem
-    ) || null;
-    textFile = bitems.find(f =>
-      f.name.replace(/\.[^.]+$/, '').toLowerCase() === stem &&
-      (f.mimeType === 'text/plain' || f.name.toLowerCase().endsWith('.txt'))
-    ) || null;
+    const normalizeFolderName = name => (name || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^[\s_\-.]+|[\s_\-.]+$/g, '');
+
+    const backNames = new Set(['back', 'backs', 'גב']);
+    const candidate = items.find(f => backNames.has(normalizeFolderName(f.name)));
+
+    if (!candidate) {
+      updateTabs();
+      return;
+    }
+
+    let backFolderId = null;
+    if (candidate.mimeType === FOLDER_MIME) {
+      backFolderId = candidate.id;
+    } else if (
+      candidate.mimeType === 'application/vnd.google-apps.shortcut' &&
+      candidate.shortcutDetails?.targetMimeType === FOLDER_MIME
+    ) {
+      backFolderId = candidate.shortcutDetails.targetId;
+    }
+
+    if (!backFolderId) {
+      updateTabs();
+      return;
+    }
+
+    const bitems = await listChildren(backFolderId);
+    const stem = (file.name || '').replace(/\.[^.]+$/, '').trim().toLowerCase();
+    const imageExt = /\.(jpg|jpeg|png|webp|gif|bmp|tif|tiff|heic|heif)$/i;
+
+    backFile = bitems.find(f => {
+      const name = (f.name || '').trim();
+      const otherStem = name.replace(/\.[^.]+$/, '').toLowerCase();
+      const looksLikeImage = /^image\//.test(f.mimeType || '') || imageExt.test(name);
+      return looksLikeImage && otherStem === stem;
+    }) || null;
+
+    textFile = bitems.find(f => {
+      const name = (f.name || '').trim();
+      const otherStem = name.replace(/\.[^.]+$/, '').toLowerCase();
+      const looksLikeText = f.mimeType === 'text/plain' || /\.txt$/i.test(name);
+      return looksLikeText && otherStem === stem;
+    }) || null;
+
     updateTabs();
   }
 
   async function showFront(i) {
     if(!currentFiles.length) return;
-    const serial = ++frontLoadSerial;
-    currentIndex=(i+currentFiles.length)%currentFiles.length;
-    frontFile=currentFiles[currentIndex];
-
-    // Hide the previous image immediately. The new front is shown only after
-    // Drive has finished determining whether Back/TXT exist and the buttons are updated.
-    revokeObject();
-    photo.hidden=true;
-    textView.hidden=true;
-    emptyState.hidden=false;
-    emptyState.textContent='טוען…';
-    backFile=null;
-    textFile=null;
-    updateTabs();
-    setActiveTab('front');
-    setStatus(`בודק גב וטקסט עבור ${frontFile.name}…`);
-
-    await findCompanions(frontFile);
-    if (serial !== frontLoadSerial) return;
-
-    // At this point Back/TXT buttons already reflect the selected image.
-    await renderImage(frontFile);
-    if (serial !== frontLoadSerial) return;
-
-    setActiveTab('front');
-    saveState();
-    updateControls();
+    currentIndex=(i+currentFiles.length)%currentFiles.length; frontFile=currentFiles[currentIndex];
+    await renderImage(frontFile); await findCompanions(frontFile); setActiveTab('front'); saveState(); updateControls();
   }
   async function showBack(){ if(backFile){ await renderImage(backFile); setActiveTab('back'); } }
   async function showText(){
@@ -269,9 +252,63 @@
   $('zoomOutBtn').onclick=()=>{ scale=Math.max(.25,scale/1.25); applyTransform(); };
   $('resetBtn').onclick=resetTransform;
   $('imageStage').addEventListener('wheel',e=>{ if(photo.hidden)return; e.preventDefault(); scale=Math.max(.25,Math.min(8,scale*(e.deltaY<0?1.12:.89))); applyTransform(); },{passive:false});
-  $('imageStage').addEventListener('pointerdown',e=>{ if(photo.hidden)return; drag={id:e.pointerId,sx:e.clientX,sy:e.clientY,ox:x,oy:y}; $('imageStage').setPointerCapture(e.pointerId); });
-  $('imageStage').addEventListener('pointermove',e=>{ if(!drag||drag.id!==e.pointerId)return; x=drag.ox+(e.clientX-drag.sx); y=drag.oy+(e.clientY-drag.sy); applyTransform(); });
-  $('imageStage').addEventListener('pointerup',()=>drag=null); $('imageStage').addEventListener('pointercancel',()=>drag=null);
+  const activePointers = new Map();
+  let pinchStart = null;
+
+  function pointerDistance() {
+    const pts = [...activePointers.values()];
+    if (pts.length < 2) return 0;
+    return Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+  }
+
+  $('imageStage').addEventListener('pointerdown', e => {
+    if (photo.hidden) return;
+    e.preventDefault();
+    activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+    $('imageStage').setPointerCapture(e.pointerId);
+
+    if (activePointers.size === 1) {
+      drag = {id:e.pointerId, sx:e.clientX, sy:e.clientY, ox:x, oy:y};
+      pinchStart = null;
+    } else if (activePointers.size === 2) {
+      drag = null;
+      pinchStart = {distance:pointerDistance(), scale};
+    }
+  });
+
+  $('imageStage').addEventListener('pointermove', e => {
+    if (!activePointers.has(e.pointerId)) return;
+    e.preventDefault();
+    activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+
+    if (activePointers.size === 2 && pinchStart) {
+      const d = pointerDistance();
+      if (pinchStart.distance > 0) {
+        scale = Math.max(.15, Math.min(8, pinchStart.scale * (d / pinchStart.distance)));
+        applyTransform();
+      }
+      return;
+    }
+
+    if (drag && drag.id === e.pointerId && activePointers.size === 1) {
+      x = drag.ox + (e.clientX - drag.sx);
+      y = drag.oy + (e.clientY - drag.sy);
+      applyTransform();
+    }
+  });
+
+  function endPointer(e) {
+    activePointers.delete(e.pointerId);
+    if (activePointers.size < 2) pinchStart = null;
+    if (activePointers.size === 0) drag = null;
+  }
+  $('imageStage').addEventListener('pointerup', endPointer);
+  $('imageStage').addEventListener('pointercancel', endPointer);
+
+  // iPhone: prevent Safari from zooming the whole page. Image zoom is handled above.
+  ['gesturestart','gesturechange','gestureend'].forEach(type => {
+    document.addEventListener(type, e => e.preventDefault(), {passive:false});
+  });
 
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
