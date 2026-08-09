@@ -145,9 +145,23 @@
   }
   function revokeObject(){ if(objectUrl){ URL.revokeObjectURL(objectUrl); objectUrl=null; } }
   async function renderImage(file) {
-    setStatus(`טוען ${file.name}…`); const blob=await fetchBlob(file); revokeObject(); objectUrl=URL.createObjectURL(blob);
-    photo.src=objectUrl; photo.hidden=false; textView.hidden=true; emptyState.hidden=true;
-    resetTransform(); setStatus(file.name);
+    setStatus(`טוען ${file.name}…`);
+    const blob = await fetchBlob(file);
+    revokeObject();
+    objectUrl = URL.createObjectURL(blob);
+
+    photo.hidden = false;
+    textView.hidden = true;
+    emptyState.hidden = true;
+
+    await new Promise((resolve, reject) => {
+      photo.onload = () => resolve();
+      photo.onerror = () => reject(new Error('לא ניתן להציג את התמונה'));
+      photo.src = objectUrl;
+    });
+
+    fitImage();
+    setStatus(file.name);
   }
 
   async function findCompanions(file) {
@@ -156,9 +170,15 @@
     const backFolder = items.find(f=>f.mimeType===FOLDER_MIME && f.name.toLowerCase()==='back');
     if(!backFolder) return updateTabs();
     const bitems=await listChildren(backFolder.id);
-    backFile=bitems.find(f=>f.name===file.name && /^image\//.test(f.mimeType)) || null;
-    const stem=file.name.replace(/\.[^.]+$/,'');
-    textFile=bitems.find(f=>f.name.toLowerCase()===`${stem}.txt`.toLowerCase() || f.name.toLowerCase()===`${file.name}.txt`.toLowerCase()) || null;
+    const stem = file.name.replace(/\.[^.]+$/, '').toLowerCase();
+    backFile = bitems.find(f =>
+      /^image\//.test(f.mimeType) &&
+      f.name.replace(/\.[^.]+$/, '').toLowerCase() === stem
+    ) || null;
+    textFile = bitems.find(f =>
+      f.name.replace(/\.[^.]+$/, '').toLowerCase() === stem &&
+      (f.mimeType === 'text/plain' || f.name.toLowerCase().endsWith('.txt'))
+    ) || null;
     updateTabs();
   }
 
@@ -181,7 +201,17 @@
   $('prevBtn').onclick=()=>showFront(currentIndex-1); $('nextBtn').onclick=()=>showFront(currentIndex+1);
 
   function applyTransform(){ photo.style.transform=`translate(${x}px,${y}px) scale(${scale})`; }
-  function resetTransform(){ scale=1; x=0; y=0; applyTransform(); }
+  function fitImage() {
+    if (!photo.naturalWidth || !photo.naturalHeight) return;
+    const stage = $('imageStage');
+    const availableWidth = stage.clientWidth;
+    const availableHeight = stage.clientHeight;
+    scale = Math.min(availableWidth / photo.naturalWidth, availableHeight / photo.naturalHeight);
+    x = 0;
+    y = 0;
+    applyTransform();
+  }
+  function resetTransform(){ fitImage(); }
   $('zoomInBtn').onclick=()=>{ scale=Math.min(8,scale*1.25); applyTransform(); };
   $('zoomOutBtn').onclick=()=>{ scale=Math.max(.25,scale/1.25); applyTransform(); };
   $('resetBtn').onclick=resetTransform;
