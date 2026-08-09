@@ -169,8 +169,13 @@
     textFile = null;
 
     const items = await listChildren(currentFolder.id);
+    const normalizeFolderName = name => (name || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^[\s_\-.]+|[\s_\-.]+$/g, '');
+
     const backNames = new Set(['back', 'backs', 'גב']);
-    const candidate = items.find(f => backNames.has((f.name || '').trim().toLowerCase()));
+    const candidate = items.find(f => backNames.has(normalizeFolderName(f.name)));
 
     if (!candidate) {
       updateTabs();
@@ -247,9 +252,63 @@
   $('zoomOutBtn').onclick=()=>{ scale=Math.max(.25,scale/1.25); applyTransform(); };
   $('resetBtn').onclick=resetTransform;
   $('imageStage').addEventListener('wheel',e=>{ if(photo.hidden)return; e.preventDefault(); scale=Math.max(.25,Math.min(8,scale*(e.deltaY<0?1.12:.89))); applyTransform(); },{passive:false});
-  $('imageStage').addEventListener('pointerdown',e=>{ if(photo.hidden)return; drag={id:e.pointerId,sx:e.clientX,sy:e.clientY,ox:x,oy:y}; $('imageStage').setPointerCapture(e.pointerId); });
-  $('imageStage').addEventListener('pointermove',e=>{ if(!drag||drag.id!==e.pointerId)return; x=drag.ox+(e.clientX-drag.sx); y=drag.oy+(e.clientY-drag.sy); applyTransform(); });
-  $('imageStage').addEventListener('pointerup',()=>drag=null); $('imageStage').addEventListener('pointercancel',()=>drag=null);
+  const activePointers = new Map();
+  let pinchStart = null;
+
+  function pointerDistance() {
+    const pts = [...activePointers.values()];
+    if (pts.length < 2) return 0;
+    return Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+  }
+
+  $('imageStage').addEventListener('pointerdown', e => {
+    if (photo.hidden) return;
+    e.preventDefault();
+    activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+    $('imageStage').setPointerCapture(e.pointerId);
+
+    if (activePointers.size === 1) {
+      drag = {id:e.pointerId, sx:e.clientX, sy:e.clientY, ox:x, oy:y};
+      pinchStart = null;
+    } else if (activePointers.size === 2) {
+      drag = null;
+      pinchStart = {distance:pointerDistance(), scale};
+    }
+  });
+
+  $('imageStage').addEventListener('pointermove', e => {
+    if (!activePointers.has(e.pointerId)) return;
+    e.preventDefault();
+    activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+
+    if (activePointers.size === 2 && pinchStart) {
+      const d = pointerDistance();
+      if (pinchStart.distance > 0) {
+        scale = Math.max(.15, Math.min(8, pinchStart.scale * (d / pinchStart.distance)));
+        applyTransform();
+      }
+      return;
+    }
+
+    if (drag && drag.id === e.pointerId && activePointers.size === 1) {
+      x = drag.ox + (e.clientX - drag.sx);
+      y = drag.oy + (e.clientY - drag.sy);
+      applyTransform();
+    }
+  });
+
+  function endPointer(e) {
+    activePointers.delete(e.pointerId);
+    if (activePointers.size < 2) pinchStart = null;
+    if (activePointers.size === 0) drag = null;
+  }
+  $('imageStage').addEventListener('pointerup', endPointer);
+  $('imageStage').addEventListener('pointercancel', endPointer);
+
+  // iPhone: prevent Safari from zooming the whole page. Image zoom is handled above.
+  ['gesturestart','gesturechange','gestureend'].forEach(type => {
+    document.addEventListener(type, e => e.preventDefault(), {passive:false});
+  });
 
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
