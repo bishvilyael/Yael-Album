@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#ffffff" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="יעל" />
+  <title>יעל – צפייה בתמונות</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <button id="treeBtn" class="iconbtn" aria-label="אלבומים">☰</button>
+    <div class="title">יעל</div>
+    <button id="loginBtn" class="primary">התחברות ל‑Google</button>
+  </header>
+
+  <main>
+    <aside id="drawer" class="drawer">
+      <div class="drawer-head">
+        <strong>אלבומים</strong>
+        <button id="closeDrawer" class="iconbtn">✕</button>
+      </div>
+      <div id="tree" class="tree"><div class="muted">יש להתחבר ל‑Google</div></div>
+    </aside>
+
+    <section class="viewer">
+      <div class="tabs">
+        <button id="frontTab" class="tab active">תמונה</button>
+        <button id="backTab" class="tab" disabled>גב</button>
+        <button id="textTab" class="tab" disabled>טקסט</button>
+      </div>
+
+      <div id="imageStage" class="stage">
+        <div id="emptyState" class="empty">בחר אלבום ותמונה</div>
+        <img id="photo" alt="" draggable="false" hidden />
+        <pre id="textView" hidden></pre>
+      </div>
+
+      <div class="toolbar">
+        <button id="prevBtn" disabled>◀ הקודם</button>
+        <button id="zoomOutBtn" disabled>−</button>
+        <button id="resetBtn" disabled>התאם</button>
+        <button id="zoomInBtn" disabled>＋</button>
+        <button id="nextBtn" disabled>הבא ▶</button>
+      </div>
+
+      <div id="status" class="status">גרסת בדיקה 0.1 – צפייה בלבד</div>
+    </section>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="app.js"></script>
+</body>
+</html>

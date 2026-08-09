@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+<rect width="512" height="512" rx="100" fill="#1769e0"/>
+<circle cx="256" cy="220" r="125" fill="white" opacity=".98"/>
+<path d="M145 330l70-78 50 48 42-43 62 73z" fill="#1769e0"/>
+<circle cx="205" cy="190" r="24" fill="#1769e0"/>
+<text x="256" y="445" font-size="92" text-anchor="middle" font-family="Arial" font-weight="700" fill="white">יעל</text>
+</svg>
