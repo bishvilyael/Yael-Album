@@ -73,7 +73,7 @@
     $('loginBtn').disabled = true;
     $('loginBtn').textContent = 'מתחבר…';
     // Important: do NOT force prompt:'consent'. Google reuses the prior grant when possible.
-    tokenClient.requestAccessToken({prompt: ''});
+    tokenClient.requestAccessToken();
   };
   $('treeBtn').onclick = () => drawer.classList.add('open');
   $('closeDrawer').onclick = () => drawer.classList.remove('open');
