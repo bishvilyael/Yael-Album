@@ -70,7 +70,7 @@
 
   async function listChildren(folderId) {
     const q = `'${folderId}' in parents and trashed=false`;
-    const fields = 'nextPageToken,files(id,name,mimeType,modifiedTime,size,capabilities(canDownload,canEdit))';
+    const fields = 'nextPageToken,files(id,name,mimeType,modifiedTime,size,capabilities(canDownload,canEdit),shortcutDetails(targetId,targetMimeType))';
     let pageToken = '', out = [];
     do {
       const u = new URL('https://www.googleapis.com/drive/v3/files');
@@ -165,20 +165,51 @@
   }
 
   async function findCompanions(file) {
-    backFile=textFile=null;
+    backFile = null;
+    textFile = null;
+
     const items = await listChildren(currentFolder.id);
-    const backFolder = items.find(f=>f.mimeType===FOLDER_MIME && f.name.toLowerCase()==='back');
-    if(!backFolder) return updateTabs();
-    const bitems=await listChildren(backFolder.id);
-    const stem = file.name.replace(/\.[^.]+$/, '').toLowerCase();
-    backFile = bitems.find(f =>
-      /^image\//.test(f.mimeType) &&
-      f.name.replace(/\.[^.]+$/, '').toLowerCase() === stem
-    ) || null;
-    textFile = bitems.find(f =>
-      f.name.replace(/\.[^.]+$/, '').toLowerCase() === stem &&
-      (f.mimeType === 'text/plain' || f.name.toLowerCase().endsWith('.txt'))
-    ) || null;
+    const backNames = new Set(['back', 'backs', 'גב']);
+    const candidate = items.find(f => backNames.has((f.name || '').trim().toLowerCase()));
+
+    if (!candidate) {
+      updateTabs();
+      return;
+    }
+
+    let backFolderId = null;
+    if (candidate.mimeType === FOLDER_MIME) {
+      backFolderId = candidate.id;
+    } else if (
+      candidate.mimeType === 'application/vnd.google-apps.shortcut' &&
+      candidate.shortcutDetails?.targetMimeType === FOLDER_MIME
+    ) {
+      backFolderId = candidate.shortcutDetails.targetId;
+    }
+
+    if (!backFolderId) {
+      updateTabs();
+      return;
+    }
+
+    const bitems = await listChildren(backFolderId);
+    const stem = (file.name || '').replace(/\.[^.]+$/, '').trim().toLowerCase();
+    const imageExt = /\.(jpg|jpeg|png|webp|gif|bmp|tif|tiff|heic|heif)$/i;
+
+    backFile = bitems.find(f => {
+      const name = (f.name || '').trim();
+      const otherStem = name.replace(/\.[^.]+$/, '').toLowerCase();
+      const looksLikeImage = /^image\//.test(f.mimeType || '') || imageExt.test(name);
+      return looksLikeImage && otherStem === stem;
+    }) || null;
+
+    textFile = bitems.find(f => {
+      const name = (f.name || '').trim();
+      const otherStem = name.replace(/\.[^.]+$/, '').toLowerCase();
+      const looksLikeText = f.mimeType === 'text/plain' || /\.txt$/i.test(name);
+      return looksLikeText && otherStem === stem;
+    }) || null;
+
     updateTabs();
   }
 
